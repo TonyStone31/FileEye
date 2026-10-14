@@ -5,12 +5,12 @@ unit FileEye;
 
 { TFileEye: point it at a file or a folder and it tells you when a file
   there is created, changed or deleted.  The watching itself is Free
-  Pascal's DirWatch; this puts it on the palette, looks at it a few times a
+  Pascal's DirWatch; this puts it on the palette, checks it a few times a
   second from the main thread, and hands over one event per file. }
 
 interface
 
-uses Classes, SysUtils, ExtCtrls, crc, FileEyeDirWatch;
+uses Classes, SysUtils, ExtCtrls, md5, FileEyeDirWatch;
 
 type
   TFileEyeChange = (fcCreated, fcChanged, fcDeleted);
@@ -20,105 +20,83 @@ type
 
   TFileEye = class(TComponent)
   private
-    WatchPath: string;
-    Wanted: boolean;
-    Watch: TDirWatch;
-    Timer: TTimer;
-    Folder, OnlyName: string;
-    // what is news since the last look, and the files that were there then
-    Seen, Known: TStringList;
-    // files this program wrote, with what it left in them
-    Ours: TStringList;
-    ChangeHandler, OwnHandler: TFileEyeEvent;
-    ErrorHandler: TFileEyeErrorEvent;
-    ErrorText: string;
+    FPath: string;
+    FEnabled: boolean;
+    FWatch: TDirWatch;
+    FTimer: TTimer;
+    // the watched folder, and the one file in it when Path is a file
+    FFolder, FFileName: string;
+    // changes since the last tick, and the files that were there then
+    FPending, FKnown: TStringList;
+    // files this program wrote, each with the MD5 of what it left in them
+    FOwnWrites: TStringList;
+    FOnChange, FOnOwnChange: TFileEyeEvent;
+    FOnError: TFileEyeErrorEvent;
+    FLastError: string;
     procedure SetPath(const Value: string);
     procedure SetEnabled(Value: boolean);
     procedure Start;
     procedure Stop;
-    procedure Look(Sender: TObject);
-    procedure Noticed(Sender: TObject; const Event: TFileChangeEvent);
+    procedure TimerTick(Sender: TObject);
+    procedure WatchChange(Sender: TObject; const Event: TFileChangeEvent);
   protected
     procedure Loaded; override;
   public
     destructor Destroy; override;
     // Call right after this program writes or deletes a file it watches:
-    // while the file stays as written, its news goes to OnOwnChange.
-    procedure Wrote(const FileName: string);
+    // while the file stays as written, its changes go to OnOwnChange.
+    procedure MarkOwnWrite(const FileName: string);
     // Why the last start failed; empty when it did not.
-    property LastError: string read ErrorText;
+    property LastError: string read FLastError;
   published
     // A file or a folder. A folder reports the files directly in it, not
     // those in its subfolders. A file need not exist yet: its folder must.
-    property Path: string read WatchPath write SetPath;
+    property Path: string read FPath write SetPath;
     // True watches; set it here to start with the form. Nothing is watched
     // in the designer.
-    property Enabled: boolean read Wanted write SetEnabled default False;
+    property Enabled: boolean read FEnabled write SetEnabled default False;
     // A file was created, changed or deleted. FileName is the full path.
     // Runs on the main thread, once per file however many times the system
     // told us about it.
-    property OnChange: TFileEyeEvent read ChangeHandler write ChangeHandler;
-    // The same, for a file that still holds what this program said it Wrote.
-    property OnOwnChange: TFileEyeEvent read OwnHandler write OwnHandler;
+    property OnChange: TFileEyeEvent read FOnChange write FOnChange;
+    // The same, for a file that still holds what MarkOwnWrite saw in it.
+    property OnOwnChange: TFileEyeEvent read FOnOwnChange write FOnOwnChange;
     // Watching could not start - the folder is missing, say. Enabled goes
     // back to False and the message stays in LastError.
-    property OnError: TFileEyeErrorEvent read ErrorHandler write ErrorHandler;
+    property OnError: TFileEyeErrorEvent read FOnError write FOnError;
   end;
 
 implementation
 
-// What a file holds, as a number; 0 is no file at all.
-function Stamp(const FileName: string): PtrUInt;
-var
-  F: TFileStream;
-  Buf: array[0..65535] of byte;
-  N: integer;
-  Sum: cardinal;
-begin
-  if not FileExists(FileName) then Exit(0);
-  // an empty file is 1
-  Sum := 1;
-  try
-    F := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
-    try
-      repeat
-        N := F.Read(Buf, SizeOf(Buf));
-        if N > 0 then Sum := crc32(Sum, @Buf[0], N);
-      until N <= 0;
-    finally
-      F.Free;
-    end;
-  except
-    // someone else has it locked, so it is not as we left it
-    Exit(High(PtrUInt));
+type
+  TOwnWrite = class
+    Digest: TMD5Digest;
   end;
-  Result := Sum;
-end;
 
 destructor TFileEye.Destroy;
 begin
   Stop;
-  Timer.Free;
+  FTimer.Free;
   inherited Destroy;
 end;
 
 procedure TFileEye.Loaded;
 begin
   inherited Loaded;
-  if Wanted then Start;
+  if FEnabled then Start;
 end;
 
 procedure TFileEye.SetPath(const Value: string);
 begin
-  if Value = WatchPath then Exit;
-  WatchPath := Value;
-  if Wanted and not (csLoading in ComponentState) then Start;
+  if Value = FPath then Exit;
+  FPath := Value;
+  if FEnabled and not (csLoading in ComponentState) then Start;
 end;
 
 procedure TFileEye.SetEnabled(Value: boolean);
 begin
-  if Value = Wanted then Exit;
-  Wanted := Value;
+  if Value = FEnabled then Exit;
+  FEnabled := Value;
   if (csLoading in ComponentState) or (csDesigning in ComponentState) then Exit;
   if Value then Start
   else
@@ -131,151 +109,153 @@ var
   Found: TSearchRec;
 begin
   Stop;
-  ErrorText := '';
-  Target := ExcludeTrailingPathDelimiter(ExpandFileName(Path));
+  FLastError := '';
+  Target := ExcludeTrailingPathDelimiter(ExpandFileName(FPath));
   // a file is watched through its folder, which sees it replaced as well as written
   if DirectoryExists(Target) then
   begin
-    Folder := Target;
-    OnlyName := '';
+    FFolder := Target;
+    FFileName := '';
   end
   else
   begin
-    Folder := ExtractFileDir(Target);
-    OnlyName := ExtractFileName(Target);
+    FFolder := ExtractFileDir(Target);
+    FFileName := ExtractFileName(Target);
   end;
   // what is there before watching starts, so a file replaced later reads as changed
-  Seen := TStringList.Create;
-  Known := TStringList.Create;
-  Known.Sorted := True;
-  Known.CaseSensitive := FileNameCaseSensitive;
-  Ours := TStringList.Create;
-  Ours.CaseSensitive := FileNameCaseSensitive;
-  if OnlyName <> '' then
+  FPending := TStringList.Create;
+  FKnown := TStringList.Create;
+  FKnown.Sorted := True;
+  FKnown.CaseSensitive := FileNameCaseSensitive;
+  FOwnWrites := TStringList.Create;
+  FOwnWrites.CaseSensitive := FileNameCaseSensitive;
+  FOwnWrites.OwnsObjects := True;
+  if FFileName <> '' then
   begin
-    if FileExists(Target) then Known.Add(Target);
+    if FileExists(Target) then FKnown.Add(Target);
   end
-  else if FindFirst(IncludeTrailingPathDelimiter(Folder) + AllFilesMask, faAnyFile, Found) = 0 then
+  else if FindFirst(IncludeTrailingPathDelimiter(FFolder) + AllFilesMask, faAnyFile, Found) = 0 then
   begin
     repeat
-      if Found.Attr and faDirectory = 0 then Known.Add(IncludeTrailingPathDelimiter(Folder) + Found.Name);
+      if Found.Attr and faDirectory = 0 then FKnown.Add(IncludeTrailingPathDelimiter(FFolder) + Found.Name);
     until FindNext(Found) <> 0;
     FindClose(Found);
   end;
-  if Path = '' then ErrorText := 'Set Path to a file or a folder first.'
-  else if not DirectoryExists(Folder) then ErrorText := 'There is no folder ' + Folder + ' to watch.'
+  if FPath = '' then FLastError := 'Set Path to a file or a folder first.'
+  else if not DirectoryExists(FFolder) then FLastError := 'There is no folder ' + FFolder + ' to watch.'
   else
   try
-    Watch := TDirWatch.Create(nil);
-    Watch.BaseDir := Folder;
-    Watch.CheckTimeout := 0;
-    Watch.AddWatch('', [feModify, feCreate, feDelete]);
-    Watch.OnChange := @Noticed;
-    Watch.InitWatch;
+    FWatch := TDirWatch.Create(nil);
+    FWatch.BaseDir := FFolder;
+    FWatch.CheckTimeout := 0;
+    FWatch.AddWatch('', [feModify, feCreate, feDelete]);
+    FWatch.OnChange := @WatchChange;
+    FWatch.InitWatch;
   except
-    on E: Exception do ErrorText := E.Message;
+    on E: Exception do FLastError := E.Message;
   end;
-  if ErrorText <> '' then
+  if FLastError <> '' then
   begin
     Stop;
-    Wanted := False;
-    if Assigned(ErrorHandler) then ErrorHandler(Self, ErrorText);
+    FEnabled := False;
+    if Assigned(FOnError) then FOnError(Self, FLastError);
     Exit;
   end;
   // made once and only switched off: OnChange may stop the eye inside the timer's own event
-  if Timer = nil then
+  if FTimer = nil then
   begin
-    Timer := TTimer.Create(nil);
-    Timer.Interval := 200;
-    Timer.OnTimer := @Look;
+    FTimer := TTimer.Create(nil);
+    FTimer.Interval := 200;
+    FTimer.OnTimer := @TimerTick;
   end;
-  Timer.Enabled := True;
+  FTimer.Enabled := True;
 end;
 
 procedure TFileEye.Stop;
 begin
-  if Timer <> nil then Timer.Enabled := False;
-  FreeAndNil(Watch);
-  FreeAndNil(Seen);
-  FreeAndNil(Known);
-  FreeAndNil(Ours);
+  if FTimer <> nil then FTimer.Enabled := False;
+  FreeAndNil(FWatch);
+  FreeAndNil(FPending);
+  FreeAndNil(FKnown);
+  FreeAndNil(FOwnWrites);
 end;
 
-procedure TFileEye.Wrote(const FileName: string);
+procedure TFileEye.MarkOwnWrite(const FileName: string);
 var
   FullName: string;
   I: integer;
 begin
   // nothing to hide while not watching
-  if Ours = nil then Exit;
+  if FOwnWrites = nil then Exit;
   FullName := ExpandFileName(FileName);
-  I := Ours.IndexOf(FullName);
-  if I < 0 then I := Ours.Add(FullName);
-  Ours.Objects[I] := TObject(Stamp(FullName));
+  I := FOwnWrites.IndexOf(FullName);
+  if I < 0 then I := FOwnWrites.AddObject(FullName, TOwnWrite.Create);
+  // a file that cannot be read, or is gone, gives all zeros
+  TOwnWrite(FOwnWrites.Objects[I]).Digest := MD5File(FullName);
 end;
 
-// What happened to each file since the last look, gathered so a burst of
+// What happened to each file since the last tick, gathered so a burst of
 // writes is one event; a change does not hide that the file is new.
-procedure TFileEye.Noticed(Sender: TObject; const Event: TFileChangeEvent);
+procedure TFileEye.WatchChange(Sender: TObject; const Event: TFileChangeEvent);
 var
   FullName: string;
   Change: TFileEyeChange;
   I: integer;
 begin
-  if (OnlyName <> '') and (Event.FileName <> OnlyName) then Exit;
+  if (FFileName <> '') and (Event.FileName <> FFileName) then Exit;
   // no name is the watched folder itself
-  if Event.FileName = '' then FullName := Folder
+  if Event.FileName = '' then FullName := FFolder
   else
-    FullName := IncludeTrailingPathDelimiter(Folder) + Event.FileName;
+    FullName := IncludeTrailingPathDelimiter(FFolder) + Event.FileName;
   if feDelete in Event.Events then Change := fcDeleted
   else if feCreate in Event.Events then Change := fcCreated
   else
     Change := fcChanged;
-  I := Seen.IndexOf(FullName);
-  if I < 0 then Seen.AddObject(FullName, TObject(PtrInt(Change)))
-  // an editor's temporary file, there and gone between two looks, is no news
-  else if (Change = fcDeleted) and (TFileEyeChange(PtrInt(Seen.Objects[I])) = fcCreated) and (Known.IndexOf(FullName) < 0) then
-    Seen.Delete(I)
-  else if not ((Change = fcChanged) and (TFileEyeChange(PtrInt(Seen.Objects[I])) = fcCreated)) then
-    Seen.Objects[I] := TObject(PtrInt(Change));
+  I := FPending.IndexOf(FullName);
+  if I < 0 then FPending.AddObject(FullName, TObject(PtrInt(Change)))
+  // an editor's temporary file, there and gone between two ticks, is no news
+  else if (Change = fcDeleted) and (TFileEyeChange(PtrInt(FPending.Objects[I])) = fcCreated) and (FKnown.IndexOf(FullName) < 0) then
+    FPending.Delete(I)
+  else if not ((Change = fcChanged) and (TFileEyeChange(PtrInt(FPending.Objects[I])) = fcCreated)) then
+    FPending.Objects[I] := TObject(PtrInt(Change));
 end;
 
-procedure TFileEye.Look(Sender: TObject);
+procedure TFileEye.TimerTick(Sender: TObject);
 var
-  Found: TStringList;
+  Changes: TStringList;
   I, K, J: integer;
   Change: TFileEyeChange;
-  Mine: boolean;
+  IsOwn: boolean;
 begin
-  if Watch = nil then Exit;
-  while Watch.Check > 0 do ;
-  if Seen.Count = 0 then Exit;
-  // the handler may stop or restart the eye, so the news gets a list of its own
-  Found := Seen;
-  Seen := TStringList.Create;
+  if FWatch = nil then Exit;
+  while FWatch.Check > 0 do ;
+  if FPending.Count = 0 then Exit;
+  // the handler may stop or restart the eye, so the changes get a list of their own
+  Changes := FPending;
+  FPending := TStringList.Create;
   try
-    for I := 0 to Found.Count - 1 do
+    for I := 0 to Changes.Count - 1 do
     begin
       // stopped by the handler
-      if Known = nil then Break;
-      Change := TFileEyeChange(PtrInt(Found.Objects[I]));
-      K := Known.IndexOf(Found[I]);
+      if FKnown = nil then Break;
+      Change := TFileEyeChange(PtrInt(Changes.Objects[I]));
+      K := FKnown.IndexOf(Changes[I]);
       // a file saved by renaming a new one over it was there all along
       if (Change = fcCreated) and (K >= 0) then Change := fcChanged;
-      if (Change = fcDeleted) and (K >= 0) then Known.Delete(K)
-      else if (Change <> fcDeleted) and (K < 0) then Known.Add(Found[I]);
+      if (Change = fcDeleted) and (K >= 0) then FKnown.Delete(K)
+      else if (Change <> fcDeleted) and (K < 0) then FKnown.Add(Changes[I]);
       // ours until someone else changes it
-      J := Ours.IndexOf(Found[I]);
-      Mine := (J >= 0) and (PtrUInt(Ours.Objects[J]) = Stamp(Found[I]));
-      if (J >= 0) and not Mine then Ours.Delete(J);
-      if Mine then
+      J := FOwnWrites.IndexOf(Changes[I]);
+      IsOwn := (J >= 0) and MD5Match(TOwnWrite(FOwnWrites.Objects[J]).Digest, MD5File(Changes[I]));
+      if (J >= 0) and not IsOwn then FOwnWrites.Delete(J);
+      if IsOwn then
       begin
-        if Assigned(OwnHandler) then OwnHandler(Self, Found[I], Change);
+        if Assigned(FOnOwnChange) then FOnOwnChange(Self, Changes[I], Change);
       end
-      else if Assigned(ChangeHandler) then ChangeHandler(Self, Found[I], Change);
+      else if Assigned(FOnChange) then FOnChange(Self, Changes[I], Change);
     end;
   finally
-    Found.Free;
+    Changes.Free;
   end;
 end;
 

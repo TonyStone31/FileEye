@@ -46,17 +46,17 @@ var
 
   procedure Settle;
   var
-    Until_: QWord;
+    Deadline: QWord;
   begin
-    Until_ := GetTickCount64 + 800;
-    while GetTickCount64 < Until_ do
+    Deadline := GetTickCount64 + 800;
+    while GetTickCount64 < Deadline do
     begin
       Application.ProcessMessages;
       Sleep(10);
     end;
   end;
 
-  procedure Write(const Name, Text: string; Append: boolean = False);
+  procedure WriteFile(const Name, Text: string; Append: boolean = False);
   var
     F: TFileStream;
   begin
@@ -77,7 +77,7 @@ var
   // How gedit, Kate and LibreOffice save: a new file, renamed over the old one.
   procedure SaveByRename(const Name, Text: string);
   begin
-    Write('.' + Name + '.tmp', Text);
+    WriteFile('.' + Name + '.tmp', Text);
     {$ifdef windows}
   MoveFileEx(PChar(Dir + '.' + Name + '.tmp'), PChar(Dir + Name), MOVEFILE_REPLACE_EXISTING);
     {$else}
@@ -119,9 +119,9 @@ begin
   Eye.Path := Dir;
   Eye.Enabled := True;
   Settle;
-  Write('a.txt', 'one');
+  WriteFile('a.txt', 'one');
   Expect('new file', ['a.txt created']);
-  Write('a.txt', ' two', True);
+  WriteFile('a.txt', ' two', True);
   Expect('written in place', ['a.txt changed'], True);
   SaveByRename('a.txt', 'three, longer');
   Expect('saved by rename', ['a.txt changed'], True);
@@ -131,49 +131,49 @@ begin
   Expect('deleted', ['c.txt deleted'], True);
 
   WriteLn('One file: ', Dir, 'note.md');
-  Write('note.md', 'first');
+  WriteFile('note.md', 'first');
   Eye.Path := Dir + 'note.md';
   Settle;
   Rec.Got.Clear;
-  Write('note.md', ' more', True);
+  WriteFile('note.md', ' more', True);
   Expect('written in place', ['note.md changed'], True);
   SaveByRename('note.md', 'saved by an editor');
   Expect('saved by rename', ['note.md changed'], True);
-  Write('other.txt', 'not watched');
+  WriteFile('other.txt', 'not watched');
   Expect('another file', [], True);
   DeleteFile(Dir + 'note.md');
   Expect('deleted', ['note.md deleted'], True);
-  Write('note.md', 'back');
+  WriteFile('note.md', 'back');
   Expect('created again', ['note.md created'], True);
   Rec.StopAfter := True;
-  Write('note.md', ' and', True);
+  WriteFile('note.md', ' and', True);
   Expect('stopped from OnChange', ['note.md changed'], True);
   Rec.StopAfter := False;
-  Write('note.md', ' forth', True);
+  WriteFile('note.md', ' forth', True);
   Expect('nothing once stopped', [], True);
   Eye.Enabled := True;
   Settle;
-  Write('note.md', ' again', True);
+  WriteFile('note.md', ' again', True);
   Expect('started again', ['note.md changed'], True);
   // how an editor tells its own saves from everyone else's
-  Write('note.md', 'saved by us');
-  Eye.Wrote(Dir + 'note.md');
+  WriteFile('note.md', 'saved by us');
+  Eye.MarkOwnWrite(Dir + 'note.md');
   Expect('our own save', ['note.md changed by us'], True);
   SaveByRename('note.md', 'saved by us, the careful way');
-  Eye.Wrote(Dir + 'note.md');
+  Eye.MarkOwnWrite(Dir + 'note.md');
   Expect('our own save by rename', ['note.md changed by us'], True);
-  Write('note.md', ' then someone else', True);
+  WriteFile('note.md', ' then someone else', True);
   Expect('someone else after us', ['note.md changed'], True);
-  Write('note.md', ' and again', True);
+  WriteFile('note.md', ' and again', True);
   Expect('and again', ['note.md changed'], True);
-  Write('note.md', 'ours');
-  Eye.Wrote(Dir + 'note.md');
-  Write('note.md', ' and theirs before the eye looked', True);
+  WriteFile('note.md', 'ours');
+  Eye.MarkOwnWrite(Dir + 'note.md');
+  WriteFile('note.md', ' and theirs before the eye looked', True);
   Expect('someone else straight after us', ['note.md changed'], True);
   DeleteFile(Dir + 'note.md');
-  Eye.Wrote(Dir + 'note.md');
+  Eye.MarkOwnWrite(Dir + 'note.md');
   Expect('deleted by us', ['note.md deleted by us'], True);
-  Write('note.md', 'theirs');
+  WriteFile('note.md', 'theirs');
   Expect('then made by someone else', ['note.md created'], True);
 
   Eye.Free;

@@ -21,10 +21,15 @@ uses
 // FSEvents is in CoreServices; a program without the LCL links nothing else for it
 {$linkframework CoreServices}
 
-// Not declared in univint
-function dispatch_queue_create(aLabel: PAnsiChar; aAttr: Pointer): dispatch_queue_t; cdecl; external name 'dispatch_queue_create';
-procedure dispatch_release(aObject: Pointer); cdecl; external name 'dispatch_release';
-procedure FSEventStreamSetDispatchQueue(aStream: FSEventStreamRef; aQueue: dispatch_queue_t); cdecl; external name 'FSEventStreamSetDispatchQueue';
+// libdispatch, declared as fcl-net's networkframeworksslsockets does
+function dispatch_queue_create(label_: PAnsiChar; attr: Pointer): dispatch_queue_t; cdecl; external;
+procedure dispatch_release(obj: Pointer); cdecl; external;
+function dispatch_semaphore_create(value: PtrInt): Pointer; cdecl; external;
+function dispatch_semaphore_signal(dsema: Pointer): PtrInt; cdecl; external;
+function dispatch_semaphore_wait(dsema: Pointer; timeout: QWord): PtrInt; cdecl; external;
+function dispatch_time(when: QWord; delta: Int64): QWord; cdecl; external;
+// FileEye: in univint on main, not in the units FPC 3.2.4 installs
+procedure FSEventStreamSetDispatchQueue(streamRef: FSEventStreamRef; q: dispatch_queue_t); cdecl; external;
 
 Type
   TFSEventsDriver = Class(TDirListDriver)
@@ -34,11 +39,13 @@ Type
     TFSEventsData = class(TDirData)
     private
       FStream : FSEventStreamRef;
+      FSignal : Pointer;
       // Set from the stream's own thread
       FChanged : Longint;
     end;
   Private
     FQueue : dispatch_queue_t;
+    FSignal : Pointer;
     function Changed : cardinal;
   Public
     Procedure Init; override;
@@ -48,8 +55,13 @@ Type
 
 procedure StreamCallback(streamRef: ConstFSEventStreamRef; clientCallBackInfo: UnivPtr; numEvents: size_t;
   eventPaths: UnivPtr; eventFlags: FSEventStreamEventFlagsPtr; eventIds: FSEventStreamEventIdPtr); mwpascal;
+
+var
+  lData : TFSEventsDriver.TFSEventsData absolute clientCallBackInfo;
+
 begin
-  InterLockedExchange(TFSEventsDriver.TFSEventsData(clientCallBackInfo).FChanged,1);
+  InterLockedExchange(lData.FChanged,1);
+  dispatch_semaphore_signal(lData.FSignal);
 end;
 
 procedure TFSEventsDriver.Init;
@@ -67,17 +79,19 @@ begin
   if BD<>'' then
     BD:=IncludeTrailingPathDelimiter(BD);
   FQueue:=dispatch_queue_create('DirWatch',Nil);
+  FSignal:=dispatch_semaphore_create(0);
   For I:=0 to Watch.Watches.Count-1 do
     begin
     Watch.Watches[i].DriverData.Free;
     lData:=TFSEventsData.Create(Watch,Watch.Watches[i]);
     Watch.Watches[i].DriverData:=lData;
+    lData.FSignal:=FSignal;
     lData.InitWatch;
     lPath:=CFStringCreateWithFileSystemRepresentation(Nil,PAnsiChar(BD+Watch.Watches[i].Path));
     lPaths:=CFArrayCreate(Nil,@lPath,1,@kCFTypeArrayCallBacks);
     lContext:=Default(FSEventStreamContext);
     lContext.info:=lData;
-    lData.FStream:=FSEventStreamCreate(Nil,@StreamCallback,@lContext,lPaths,High(FSEventStreamEventId),0.05,kFSEventStreamCreateFlagNoDefer);
+    lData.FStream:=FSEventStreamCreate(Nil,@StreamCallback,@lContext,lPaths,FSEventStreamEventId(kFSEventStreamEventIdSinceNow),0.05,kFSEventStreamCreateFlagNoDefer);
     CFRelease(lPaths);
     CFRelease(lPath);
     FSEventStreamSetDispatchQueue(lData.FStream,FQueue);
@@ -103,37 +117,39 @@ end;
 
 function TFSEventsDriver.DoCheck: cardinal;
 
-var
-  lUntil : QWord;
-
 begin
-  lUntil:=GetTickCount64+Watch.CheckTimeOut;
-  Repeat
-    Result:=Changed;
-    if (Result=0) and (GetTickCount64<lUntil) then
-      Sleep(10);
-  until (Result>0) or (GetTickCount64>=lUntil) or Terminated;
+  Result:=Changed;
+  // DISPATCH_TIME_NOW is 0
+  if (Result=0) and (Watch.CheckTimeOut>0) then
+    if dispatch_semaphore_wait(FSignal,dispatch_time(0,Int64(Watch.CheckTimeOut)*1000000))=0 then
+      Result:=Changed;
 end;
 
 procedure TFSEventsDriver.Done;
 
 var
   I : Integer;
-  lData : TFSEventsData;
+  D : TObject;
+  lData : TFSEventsData absolute D;
 
 begin
-  For I:=0 to Watch.Watches.Count-1 do
-    begin
-    lData:=TFSEventsData(Watch.Watches[i].DriverData);
-    if Assigned(lData) and Assigned(lData.FStream) then
+  if Assigned(Watch) then
+    For I:=0 to Watch.Watches.Count-1 do
       begin
-      FSEventStreamStop(lData.FStream);
-      FSEventStreamInvalidate(lData.FStream);
-      FSEventStreamRelease(lData.FStream);
-      lData.FStream:=Nil;
+      D:=Watch.Watches[i].DriverData;
+      Watch.Watches[i].DriverData:=Nil;
+      if Assigned(lData) and Assigned(lData.FStream) then
+        begin
+        FSEventStreamStop(lData.FStream);
+        FSEventStreamInvalidate(lData.FStream);
+        FSEventStreamRelease(lData.FStream);
+        end;
+      FreeAndNil(D);
       end;
-    end;
   if Assigned(FQueue) then
     dispatch_release(FQueue);
   FQueue:=Nil;
+  if Assigned(FSignal) then
+    dispatch_release(FSignal);
+  FSignal:=Nil;
 end;

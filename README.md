@@ -39,7 +39,7 @@ Eye.Enabled := True;
 | `Path` | A file or a folder. A folder reports the files directly in it, not those in its subfolders. A file does not have to exist yet, but its folder does. |
 | `Enabled` | True watches. Set in the Object Inspector, it starts with the form. Nothing is watched in the designer. |
 | `OnChange` | `FileName` (the full path) and `Change`: `fcCreated`, `fcChanged` or `fcDeleted`. On the main thread, once per file per look, however many times the system reported it. |
-| `Wrote`, `OnOwnChange` | Say which file this program just wrote, and its own changes come to `OnOwnChange` instead. See below. |
+| `MarkOwnWrite`, `OnOwnChange` | Say which file this program just wrote, and its own changes come to `OnOwnChange` instead. See below. |
 | `OnError`, `LastError` | Watching could not start, for example because the folder is missing. `Enabled` goes back to False. |
 
 `OnChange` is safe to work in: you can load the file, change `Path`, or turn
@@ -50,7 +50,7 @@ the eye right after the write:
 
 ```pascal
 Memo1.Lines.SaveToFile(FileName);
-Eye.Wrote(FileName);
+Eye.MarkOwnWrite(FileName);
 ```
 
 While the file still holds what was written, its news goes to
