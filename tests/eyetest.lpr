@@ -21,6 +21,7 @@ type
     Got: TStringList;
     StopAfter: boolean;
     procedure Changed(Sender: TObject; const FileName: string; Change: TFileEyeChange);
+    procedure OwnChanged(Sender: TObject; const FileName: string; Change: TFileEyeChange);
   end;
 
 const
@@ -36,6 +37,11 @@ var
   begin
     Got.Add(ExtractFileName(FileName) + ' ' + Kinds[Change]);
     if StopAfter then (Sender as TFileEye).Enabled := False;
+  end;
+
+  procedure TRecorder.OwnChanged(Sender: TObject; const FileName: string; Change: TFileEyeChange);
+  begin
+    Got.Add(ExtractFileName(FileName) + ' ' + Kinds[Change] + ' by us');
   end;
 
   procedure Settle;
@@ -107,6 +113,7 @@ begin
   Rec.Got := TStringList.Create;
   Eye := TFileEye.Create(nil);
   Eye.OnChange := @Rec.Changed;
+  Eye.OnOwnChange := @Rec.OwnChanged;
 
   WriteLn('A folder: ', Dir);
   Eye.Path := Dir;
@@ -148,6 +155,26 @@ begin
   Settle;
   Write('note.md', ' again', True);
   Expect('started again', ['note.md changed'], True);
+  // how an editor tells its own saves from everyone else's
+  Write('note.md', 'saved by us');
+  Eye.Wrote(Dir + 'note.md');
+  Expect('our own save', ['note.md changed by us'], True);
+  SaveByRename('note.md', 'saved by us, the careful way');
+  Eye.Wrote(Dir + 'note.md');
+  Expect('our own save by rename', ['note.md changed by us'], True);
+  Write('note.md', ' then someone else', True);
+  Expect('someone else after us', ['note.md changed'], True);
+  Write('note.md', ' and again', True);
+  Expect('and again', ['note.md changed'], True);
+  Write('note.md', 'ours');
+  Eye.Wrote(Dir + 'note.md');
+  Write('note.md', ' and theirs before the eye looked', True);
+  Expect('someone else straight after us', ['note.md changed'], True);
+  DeleteFile(Dir + 'note.md');
+  Eye.Wrote(Dir + 'note.md');
+  Expect('deleted by us', ['note.md deleted by us'], True);
+  Write('note.md', 'theirs');
+  Expect('then made by someone else', ['note.md created'], True);
 
   Eye.Free;
   DeleteFile(Dir + 'note.md');

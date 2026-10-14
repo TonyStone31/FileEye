@@ -39,10 +39,24 @@ Eye.Enabled := True;
 | `Path` | A file or a folder. A folder reports the files directly in it, not those in its subfolders. A file does not have to exist yet, but its folder does. |
 | `Enabled` | True watches. Set in the Object Inspector, it starts with the form. Nothing is watched in the designer. |
 | `OnChange` | `FileName` (the full path) and `Change`: `fcCreated`, `fcChanged` or `fcDeleted`. On the main thread, once per file per look, however many times the system reported it. |
+| `Wrote`, `OnOwnChange` | Say which file this program just wrote, and its own changes come to `OnOwnChange` instead. See below. |
 | `OnError`, `LastError` | Watching could not start, for example because the folder is missing. `Enabled` goes back to False. |
 
 `OnChange` is safe to work in: you can load the file, change `Path`, or turn
 the eye off from inside it.
+
+An editor saving its own file does not want to hear about it as news. Tell
+the eye right after the write:
+
+```pascal
+Memo1.Lines.SaveToFile(FileName);
+Eye.Wrote(FileName);
+```
+
+While the file still holds what was written, its news goes to
+`OnOwnChange` instead of `OnChange`. Once another program changes it,
+`OnChange` hears about it again. The eye checks by reading the file, not by
+its time, so this works however coarse the system's file times are.
 
 ## What counts as a change
 
@@ -102,7 +116,7 @@ prints what it saw.
 ## Tested on
 
 Linux Mint (GTK3), Windows 10 and macOS Sequoia 15 on Intel, the last two
-in virtual machines: `tests/eyetest` passes all thirteen cases on each. Built
+in virtual machines: `tests/eyetest` passes all twenty-one cases on each. Built
 with Free Pascal 3.2.4 and Lazarus 4.8 on the Mac, and with the development
 versions on Linux, where Windows is cross-built.
 

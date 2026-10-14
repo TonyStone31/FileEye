@@ -10,7 +10,7 @@ unit FileEye;
 
 interface
 
-uses Classes, SysUtils, ExtCtrls, FileEyeDirWatch;
+uses Classes, SysUtils, ExtCtrls, crc, FileEyeDirWatch;
 
 type
   TFileEyeChange = (fcCreated, fcChanged, fcDeleted);
@@ -27,7 +27,9 @@ type
     Folder, OnlyName: string;
     // what is news since the last look, and the files that were there then
     Seen, Known: TStringList;
-    ChangeHandler: TFileEyeEvent;
+    // files this program wrote, with what it left in them
+    Ours: TStringList;
+    ChangeHandler, OwnHandler: TFileEyeEvent;
     ErrorHandler: TFileEyeErrorEvent;
     ErrorText: string;
     procedure SetPath(const Value: string);
@@ -40,6 +42,9 @@ type
     procedure Loaded; override;
   public
     destructor Destroy; override;
+    // Call right after this program writes or deletes a file it watches:
+    // while the file stays as written, its news goes to OnOwnChange.
+    procedure Wrote(const FileName: string);
     // Why the last start failed; empty when it did not.
     property LastError: string read ErrorText;
   published
@@ -53,12 +58,42 @@ type
     // Runs on the main thread, once per file however many times the system
     // told us about it.
     property OnChange: TFileEyeEvent read ChangeHandler write ChangeHandler;
+    // The same, for a file that still holds what this program said it Wrote.
+    property OnOwnChange: TFileEyeEvent read OwnHandler write OwnHandler;
     // Watching could not start - the folder is missing, say. Enabled goes
     // back to False and the message stays in LastError.
     property OnError: TFileEyeErrorEvent read ErrorHandler write ErrorHandler;
   end;
 
 implementation
+
+// What a file holds, as a number; 0 is no file at all.
+function Stamp(const FileName: string): PtrUInt;
+var
+  F: TFileStream;
+  Buf: array[0..65535] of byte;
+  N: integer;
+  Sum: cardinal;
+begin
+  if not FileExists(FileName) then Exit(0);
+  // an empty file is 1
+  Sum := 1;
+  try
+    F := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
+    try
+      repeat
+        N := F.Read(Buf, SizeOf(Buf));
+        if N > 0 then Sum := crc32(Sum, @Buf[0], N);
+      until N <= 0;
+    finally
+      F.Free;
+    end;
+  except
+    // someone else has it locked, so it is not as we left it
+    Exit(High(PtrUInt));
+  end;
+  Result := Sum;
+end;
 
 destructor TFileEye.Destroy;
 begin
@@ -82,6 +117,7 @@ end;
 
 procedure TFileEye.SetEnabled(Value: boolean);
 begin
+  if Value = Wanted then Exit;
   Wanted := Value;
   if (csLoading in ComponentState) or (csDesigning in ComponentState) then Exit;
   if Value then Start
@@ -113,6 +149,8 @@ begin
   Known := TStringList.Create;
   Known.Sorted := True;
   Known.CaseSensitive := FileNameCaseSensitive;
+  Ours := TStringList.Create;
+  Ours.CaseSensitive := FileNameCaseSensitive;
   if OnlyName <> '' then
   begin
     if FileExists(Target) then Known.Add(Target);
@@ -160,6 +198,20 @@ begin
   FreeAndNil(Watch);
   FreeAndNil(Seen);
   FreeAndNil(Known);
+  FreeAndNil(Ours);
+end;
+
+procedure TFileEye.Wrote(const FileName: string);
+var
+  FullName: string;
+  I: integer;
+begin
+  // nothing to hide while not watching
+  if Ours = nil then Exit;
+  FullName := ExpandFileName(FileName);
+  I := Ours.IndexOf(FullName);
+  if I < 0 then I := Ours.Add(FullName);
+  Ours.Objects[I] := TObject(Stamp(FullName));
 end;
 
 // What happened to each file since the last look, gathered so a burst of
@@ -191,8 +243,9 @@ end;
 procedure TFileEye.Look(Sender: TObject);
 var
   Found: TStringList;
-  I, K: integer;
+  I, K, J: integer;
   Change: TFileEyeChange;
+  Mine: boolean;
 begin
   if Watch = nil then Exit;
   while Watch.Check > 0 do ;
@@ -211,7 +264,15 @@ begin
       if (Change = fcCreated) and (K >= 0) then Change := fcChanged;
       if (Change = fcDeleted) and (K >= 0) then Known.Delete(K)
       else if (Change <> fcDeleted) and (K < 0) then Known.Add(Found[I]);
-      if Assigned(ChangeHandler) then ChangeHandler(Self, Found[I], Change);
+      // ours until someone else changes it
+      J := Ours.IndexOf(Found[I]);
+      Mine := (J >= 0) and (PtrUInt(Ours.Objects[J]) = Stamp(Found[I]));
+      if (J >= 0) and not Mine then Ours.Delete(J);
+      if Mine then
+      begin
+        if Assigned(OwnHandler) then OwnHandler(Self, Found[I], Change);
+      end
+      else if Assigned(ChangeHandler) then ChangeHandler(Self, Found[I], Change);
     end;
   finally
     Found.Free;
