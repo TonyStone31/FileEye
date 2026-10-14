@@ -18,7 +18,10 @@ uses
   MacOSAll;
 {$ENDIF}
 
-// Not in the headers of FPC 3.2
+// FSEvents is in CoreServices; a program without the LCL links nothing else for it
+{$linkframework CoreServices}
+
+// Not declared in univint
 function dispatch_queue_create(aLabel: PAnsiChar; aAttr: Pointer): dispatch_queue_t; cdecl; external name 'dispatch_queue_create';
 procedure dispatch_release(aObject: Pointer); cdecl; external name 'dispatch_release';
 procedure FSEventStreamSetDispatchQueue(aStream: FSEventStreamRef; aQueue: dispatch_queue_t); cdecl; external name 'FSEventStreamSetDispatchQueue';

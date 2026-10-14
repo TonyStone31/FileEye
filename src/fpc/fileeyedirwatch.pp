@@ -33,18 +33,19 @@ unit FileEyeDirWatch;
 {$DEFINE USEWINAPI}
 {$DEFINE USEDIRLIST}
 {$ELSE MSWINDOWS}
-// FileEye: FSEvents on macOS, which hears a file in the folder being written
-{$IFDEF DARWIN}
+// FileEye: FSEvents on macOS, which hears a file in the folder being written;
+// iOS has no FSEvents and keeps kqueue
+{$IF DEFINED(DARWIN) AND NOT (DEFINED(IOS) OR DEFINED(IPHONESIM) OR DEFINED(WATCHOS) OR DEFINED(TVOS))}
 {$DEFINE USEFSEVENTS}
 {$DEFINE USEDIRLIST}
-{$ELSE DARWIN}
+{$ELSE}
 {$IFDEF BSD}
 {$DEFINE USEKQUEUE}
 {$DEFINE USEDIRLIST}
 {$ELSE}
 {$DEFINE USEGENERIC}
 {$ENDIF BSD}
-{$ENDIF DARWIN}
+{$ENDIF}
 {$ENDIF MSWINDOWS}
 {$ENDIF LINUX}
 {$ENDIF FORCEGENERIC}

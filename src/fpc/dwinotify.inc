@@ -107,7 +107,7 @@ begin
   MA(IN_CLOSE_WRITE,feAttrib);
   MA(IN_CLOSE_NOWRITE,feAttrib);
   MA(IN_OPEN,feAttrib);
-  // FileEye: these two were the wrong way round
+  // FileEye: a file moved out has gone from here, one moved in is new
   MA(IN_MOVED_FROM,feDelete);
   MA(IN_MOVED_TO,feCreate);
   MA(IN_CREATE,feCreate);
