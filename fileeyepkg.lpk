@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Package Version="5">
+    <Name Value="FileEyePkg"/>
+    <Type Value="RunAndDesignTime"/>
+    <Author Value="Tony Stone"/>
+    <CompilerOptions>
+      <Version Value="11"/>
+      <SearchPaths>
+        <IncludeFiles Value="src;src/fpc"/>
+        <OtherUnitFiles Value="src;src/fpc"/>
+        <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
+      </SearchPaths>
+    </CompilerOptions>
+    <Description Value="TFileEye: events when a file or the files in a folder are created, changed or deleted. Linux, Windows and macOS."/>
+    <License Value="0BSD for FileEye; src/fpc is Free Pascal's DirWatch under its own license (COPYING.FPC)."/>
+    <Version Major="1"/>
+    <Files Count="3">
+      <Item1>
+        <Filename Value="src/fileeye.pas"/>
+        <UnitName Value="FileEye"/>
+      </Item1>
+      <Item2>
+        <Filename Value="src/fileeyereg.pas"/>
+        <HasRegisterProc Value="True"/>
+        <UnitName Value="FileEyeReg"/>
+      </Item2>
+      <Item3>
+        <Filename Value="src/fpc/fileeyedirwatch.pp"/>
+        <UnitName Value="FileEyeDirWatch"/>
+      </Item3>
+    </Files>
+    <RequiredPkgs Count="1">
+      <Item1>
+        <PackageName Value="LCL"/>
+      </Item1>
+    </RequiredPkgs>
+    <UsageOptions>
+      <UnitPath Value="$(PkgOutDir)"/>
+    </UsageOptions>
+    <PublishOptions>
+      <Version Value="2"/>
+    </PublishOptions>
+  </Package>
+</CONFIG>

@@ -1,0 +1,113 @@
+object DemoForm: TDemoForm
+  Left = 10
+  Height = 420
+  Top = 10
+  Width = 640
+  Caption = 'FileEye Demo'
+  ClientHeight = 420
+  ClientWidth = 640
+  Position = poScreenCenter
+  object PathEdit: TEdit
+    AnchorSideLeft.Control = Owner
+    AnchorSideTop.Control = Owner
+    AnchorSideRight.Control = FolderButton
+    Left = 8
+    Height = 32
+    Top = 8
+    Width = 404
+    Anchors = [akTop, akLeft, akRight]
+    BorderSpacing.Left = 8
+    BorderSpacing.Top = 8
+    BorderSpacing.Right = 8
+    TabOrder = 0
+    TextHint = 'A folder, or one file'
+  end
+  object FolderButton: TButton
+    AnchorSideTop.Control = PathEdit
+    AnchorSideRight.Control = FileButton
+    Left = 420
+    Height = 32
+    Top = 8
+    Width = 100
+    Anchors = [akTop, akRight]
+    BorderSpacing.Right = 8
+    Caption = 'Folder...'
+    TabOrder = 1
+    OnClick = FolderButtonClick
+  end
+  object FileButton: TButton
+    AnchorSideTop.Control = PathEdit
+    AnchorSideRight.Control = Owner
+    AnchorSideRight.Side = asrBottom
+    Left = 528
+    Height = 32
+    Top = 8
+    Width = 100
+    Anchors = [akTop, akRight]
+    BorderSpacing.Right = 12
+    Caption = 'File...'
+    TabOrder = 2
+    OnClick = FileButtonClick
+  end
+  object WatchBox: TCheckBox
+    AnchorSideLeft.Control = PathEdit
+    AnchorSideTop.Control = PathEdit
+    AnchorSideTop.Side = asrBottom
+    Left = 8
+    Height = 23
+    Top = 48
+    Width = 70
+    BorderSpacing.Top = 8
+    Caption = 'Watch'
+    TabOrder = 3
+    OnChange = WatchBoxChange
+  end
+  object ClearButton: TButton
+    AnchorSideTop.Control = WatchBox
+    AnchorSideTop.Side = asrCenter
+    AnchorSideRight.Control = FileButton
+    AnchorSideRight.Side = asrBottom
+    Left = 528
+    Height = 32
+    Top = 44
+    Width = 100
+    Anchors = [akTop, akRight]
+    Caption = 'Clear'
+    TabOrder = 4
+    OnClick = ClearButtonClick
+  end
+  object Log: TListBox
+    AnchorSideLeft.Control = Owner
+    AnchorSideTop.Control = ClearButton
+    AnchorSideTop.Side = asrBottom
+    AnchorSideRight.Control = Owner
+    AnchorSideRight.Side = asrBottom
+    AnchorSideBottom.Control = Owner
+    AnchorSideBottom.Side = asrBottom
+    Left = 8
+    Height = 328
+    Top = 84
+    Width = 620
+    Anchors = [akTop, akLeft, akRight, akBottom]
+    BorderSpacing.Left = 8
+    BorderSpacing.Top = 8
+    BorderSpacing.Right = 12
+    BorderSpacing.Bottom = 8
+    ItemHeight = 0
+    TabOrder = 5
+  end
+  object Eye: TFileEye
+    OnChange = EyeChange
+    OnError = EyeError
+    Left = 560
+    Top = 344
+  end
+  object FolderDialog: TSelectDirectoryDialog
+    Left = 480
+    Top = 344
+  end
+  object FileDialog: TOpenDialog
+    Left = 400
+    Top = 344
+  end
+end
