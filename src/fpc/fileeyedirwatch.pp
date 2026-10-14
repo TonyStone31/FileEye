@@ -33,12 +33,18 @@ unit FileEyeDirWatch;
 {$DEFINE USEWINAPI}
 {$DEFINE USEDIRLIST}
 {$ELSE MSWINDOWS}
+// FileEye: FSEvents on macOS, which hears a file in the folder being written
+{$IFDEF DARWIN}
+{$DEFINE USEFSEVENTS}
+{$DEFINE USEDIRLIST}
+{$ELSE DARWIN}
 {$IFDEF BSD}
 {$DEFINE USEKQUEUE}
 {$DEFINE USEDIRLIST}
 {$ELSE}
 {$DEFINE USEGENERIC}
 {$ENDIF BSD}
+{$ENDIF DARWIN}
 {$ENDIF MSWINDOWS}
 {$ENDIF LINUX}
 {$ENDIF FORCEGENERIC}
@@ -266,6 +272,9 @@ implementation
 {$ENDIF}
 {$IFDEF USEKQUEUE}
 {$INCLUDE dwkqueue.inc}
+{$ENDIF}
+{$IFDEF USEFSEVENTS}
+{$INCLUDE dwfsevents.inc}
 {$ENDIF}
 
 
@@ -771,6 +780,9 @@ initialization
 {$ENDIF}
 {$IFDEF USEKQUEUE}
   TCustomDirwatch.DefaultDriverClass:=TKQueueDriver;
+{$ENDIF}
+{$IFDEF USEFSEVENTS}
+  TCustomDirwatch.DefaultDriverClass:=TFSEventsDriver;
 {$ENDIF}
 end.
 

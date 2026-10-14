@@ -61,7 +61,10 @@ end;
 procedure TINotifyDriver.Init;
 
 Const
-  NativeEvents : Array[TWatchFileEvent] of cint = (IN_Modify,IN_Attrib,IN_Create,IN_Delete);
+  // FileEye: a file renamed in or out is created or deleted too - editors save
+  // that way - and the watched folder itself can go.
+  NativeEvents : Array[TWatchFileEvent] of cint = (IN_Modify,IN_Attrib,IN_Create or IN_MOVED_TO,
+    IN_Delete or IN_MOVED_FROM or IN_DELETE_SELF or IN_MOVE_SELF);
 
 Var
   WD,I,NEvents : Integer;
@@ -104,8 +107,9 @@ begin
   MA(IN_CLOSE_WRITE,feAttrib);
   MA(IN_CLOSE_NOWRITE,feAttrib);
   MA(IN_OPEN,feAttrib);
-  MA(IN_MOVED_FROM,feCreate);
-  MA(IN_MOVED_TO,feDelete);
+  // FileEye: these two were the wrong way round
+  MA(IN_MOVED_FROM,feDelete);
+  MA(IN_MOVED_TO,feCreate);
   MA(IN_CREATE,feCreate);
   Ma(IN_DELETE,feDelete);
   Ma(IN_DELETE_SELF,feDelete);
