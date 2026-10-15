@@ -13,9 +13,9 @@
 
 uses
 {$IFDEF FPC_DOTTEDUNITS}
-  MacOsApi.MacOSAll;
+  UnixApi.Base, MacOsApi.MacOSAll;
 {$ELSE}
-  MacOSAll;
+  baseunix, MacOSAll;
 {$ENDIF}
 
 // FSEvents is in CoreServices; a program without the LCL links nothing else for it

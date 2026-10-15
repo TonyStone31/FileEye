@@ -88,6 +88,9 @@ its fixes marked `FileEye:` in the source:
 - On macOS it watched folders with kqueue, which reports added and removed
   names but not writes to an existing file. A small FSEvents driver
   replaces it.
+- On Windows and macOS it compared file times in whole seconds, two of
+  them on Windows, so a second write of the same size soon after the
+  first was missed. It now uses the full time the system keeps.
 
 The fixes are being submitted to Free Pascal. Once a release has them, the
 copy will be removed and FileEye will use FPC's unit; the API stays the
@@ -96,9 +99,10 @@ same.
 ## Limits
 
 - Subfolders are not watched.
-- On Windows and macOS a change is detected by the file's size and its
-  time, to the second. Two writes of the same size within one second count
-  as one.
+- On Windows and macOS a change is found by the file's size and time.
+  NTFS and APFS keep the time to a fraction of a microsecond, but FAT
+  drives keep it to two seconds and HFS+ to one, and there two writes of
+  the same size inside that count as one.
 - Network shares report changes only as well as the server tells the
   system, which on some shares is not at all.
 
@@ -114,7 +118,7 @@ runs every case above in a temporary folder and prints the results.
 ## Tested on
 
 Linux Mint (GTK3), Windows 10 and macOS Sequoia 15 on Intel, the last two
-in virtual machines: `tests/eyetest` passes all twenty-one cases on each. Built
+in virtual machines: `tests/eyetest` passes all twenty-three cases on each. Built
 with Free Pascal 3.2.4 and Lazarus 4.8 on the Mac, and with the development
 versions on Linux, where Windows is cross-built.
 

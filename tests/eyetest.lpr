@@ -14,6 +14,7 @@ uses
   Forms,
   Classes,
   SysUtils,
+  DateUtils,
   FileEye;
 
 type
@@ -72,6 +73,19 @@ var
     finally
       F.Free;
     end;
+  end;
+
+  // The start of an even second, so two writes 800 ms apart share one whole
+  // second, and one of Windows' two-second file times too.
+  procedure WaitForEvenSecond;
+  var
+    T: TDateTime;
+  begin
+    repeat
+      Application.ProcessMessages;
+      Sleep(2);
+      T := Now;
+    until (SecondOf(T) mod 2 = 0) and (MilliSecondOf(T) < 30);
   end;
 
   // How gedit, Kate and LibreOffice save: a new file, renamed over the old one.
@@ -155,6 +169,12 @@ begin
   Settle;
   WriteFile('note.md', ' again', True);
   Expect('started again', ['note.md changed'], True);
+  // file times in whole seconds cannot tell these two apart
+  WaitForEvenSecond;
+  WriteFile('note.md', 'same size one');
+  Expect('rewritten', ['note.md changed'], True);
+  WriteFile('note.md', 'same size two');
+  Expect('rewritten, same size, same second', ['note.md changed'], True);
   // how an editor tells its own saves from everyone else's
   WriteFile('note.md', 'saved by us');
   Eye.MarkOwnWrite(Dir + 'note.md');

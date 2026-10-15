@@ -251,6 +251,8 @@ Type
   end;
 
 Function SearchRecToString(Info : TSearchRec; AEvents : TWatchFileEvents) : String;
+// FileEye: with the file's name, the time is as fine as the system keeps it
+Function SearchRecToString(const aFileName : String; Info : TSearchRec; AEvents : TWatchFileEvents) : String;
 
 {$ENDIF}
 
@@ -620,10 +622,39 @@ const
   pTime = 1;
   pAttr = 2;
 
+// FileEye: the file's time as finely as the system keeps it.  Info.Time is
+// in whole seconds, two of them on Windows, so a second write of the same
+// size inside that was not seen.
+Function FileTimeOf(const aFileName : String; const Info : TSearchRec) : Int64;
+
+{$IF NOT DEFINED(MSWINDOWS) AND DEFINED(BSD)}
+Var
+  St : TStat;
+{$ENDIF}
+
+begin
+{$IF DEFINED(MSWINDOWS)}
+  Result:=(Int64(Info.FindData.ftLastWriteTime.dwHighDateTime) shl 32) or Info.FindData.ftLastWriteTime.dwLowDateTime;
+{$ELSEIF DEFINED(BSD)}
+  if fpStat(aFileName,St)=0 then
+    Result:=Int64(St.st_mtime)*1000000000+St.st_mtimensec
+  else
+    Result:=Info.Time;
+{$ELSE}
+  Result:=Info.Time;
+{$ENDIF}
+end;
+
 Function SearchRecToString(Info : TSearchRec; AEvents : TWatchFileEvents) : String;
 
 begin
   Result:=IntToStr(Info.Size)+';'+IntToStr(Info.Time)+';'+IntToStr(Info.Attr);
+end;
+
+Function SearchRecToString(const aFileName : String; Info : TSearchRec; AEvents : TWatchFileEvents) : String;
+
+begin
+  Result:=IntToStr(Info.Size)+';'+IntToStr(FileTimeOf(aFileName,Info))+';'+IntToStr(Info.Attr);
 end;
 
 constructor TDirListDriver.TDirData.Create(aWatch : TCustomDirwatch;aEntry: TWatchDirectoryEntry);
@@ -652,7 +683,7 @@ begin
         RFN:=ExtractRelativePath(aBaseDir,FFN);
         if (faDirectory and Info.Attr) = 0 then
           begin
-          lData:=SearchRecToString(Info,FEntry.Events);
+          lData:=SearchRecToString(FFN,Info,FEntry.Events);
           AList.Add(RFN,lData);
           end
       until FindNext(Info)<>0;
